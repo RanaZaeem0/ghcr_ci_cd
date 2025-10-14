@@ -1,0 +1,16 @@
+{
+  "name": "ghcr_ci_cd",
+  "version": "1.0.0",
+  "description": "A sample project demonstrating CI/CD with GitHub Container Registry",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "docker",
+    "ghcr",
+    "ci-cd"
+  ],
+  "author": "",
+  "license": "MIT"
+}
