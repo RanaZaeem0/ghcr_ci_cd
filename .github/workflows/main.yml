@@ -1,0 +1,90 @@
+name: Deploy to EC2
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: "🚀 Deploy to EC2"
+        env:
+          EC2_HOST: "${{ secrets.EC2_HOST }}"
+          BACKEND_ENV: "${{ secrets.BACKEND_ENV }}"
+          GH_PAT: "${{ secrets.GH_PAT_REPO }}"
+        run: |
+          ssh -o StrictHostKeyChecking=no $EC2_HOST << EOF
+            set -e
+
+            echo "===> Checking repo..."
+            if [ ! -d ~/smit/SMIT-BOT/.git ]; then
+              echo "===> Repo not found. Cloning..."
+              mkdir -p ~/smit
+              git clone https://$GH_PAT@github.com/saylanitech/SMIT-BOT.git ~/smit/SMIT-BOT
+              cd ~/smit/SMIT-BOT
+            else
+              echo "===> Repo exists. Pulling latest..."
+              cd ~/smit/SMIT-BOT
+            fi
+
+            echo "===> Forcing remote to HTTPS with PAT..."
+            git remote set-url origin https://$GH_PAT@github.com/saylanitech/SMIT-BOT.git
+
+            echo "===> Fetching and resetting branch..."
+            git fetch origin main 
+            git checkout main 
+            git reset --hard origin/main
+
+            # Clean everything except logs directory
+            git clean -fd -e logs
+
+            echo "===> Pulling latest image GHCR"
+            sudo docker pull ghcr.io/saylanitech/saylani_bot:latest || true
+
+            echo "===> create docker build "
+            sudo docker build -t saylani_bot:latest .
+
+            echo "===> push latest image to ghcr"
+            sudo docker tag saylani_bot:latest ghcr.io/saylanitech/saylani_bot:latest
+            sudo docker push ghcr.io/saylanitech/saylani_bot:latest
+
+            echo "===> Stopping old container..."
+            sudo docker rm -f saylani_bot || true
+
+
+            echo "===> Creating .env file..."
+            cat > /tmp/bot.env << 'ENVEOF'
+          BACKEND_ENV=$BACKEND_ENV
+          ENVEOF
+
+            echo "===> Running new container..."
+            sudo docker run -d \
+              --name saylani_bot \
+              -p 8000:8000 \
+              --env-file /tmp/bot.env \
+              --restart unless-stopped \
+              saylani_bot:latest
+
+            echo "===> Cleaning up..."
+            rm -f /tmp/bot.env
+
+            echo "===> Verifying deployment..."
+            sleep 5
+            if sudo docker ps | grep -q saylani_bot; then
+              echo "✅ Container is running"
+              echo "===> Checking logs..."
+              sudo docker logs --tail 50 saylani_bot
+            else
+              echo "❌ Container failed to start"
+              sudo docker logs saylani_bot
+              exit 1
+            fi
+          EOF
